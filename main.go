@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"log"
@@ -50,6 +51,7 @@ func main() {
 	if err != nil {
 		log.Panic(err)
 	}
+	weatherService := NewOpenWeatherMapWeatherService(os.Getenv("API_KEY"))
 	db, err := gorm.Open(sqlite.Open("db.db"), &gorm.Config{})
 	db.AutoMigrate(&City{})
 
@@ -98,14 +100,20 @@ func main() {
 			// Если сообщение не является командой
 			switch update.Message.Text {
 			case "Погода":
-				msg.Text = "Погода в ваших городах:\n"
 				var cities []string
 				db.
 					Select("city").
 					Where("user_id = ?", update.Message.From.ID).
 					Table("cities").
 					Find(&cities)
-				msg.Text += fetchWeather(cities)
+				if len(cities) > 0 {
+					msg.Text = "Погода в ваших городах:\n"
+					for _, w := range weatherService.fetchWeather(cities) {
+						msg.Text += w
+					}
+				} else {
+					msg.Text = "У вас ещё нет отслеживаемых городов"
+				}
 			case "Добавить город":
 				msg.Text = "Для добавления города напишите /add <Название города>"
 			case "Удалить город":
@@ -120,13 +128,20 @@ func main() {
 	}
 }
 
-func fetchWeather(cities []string) (response string) {
-	// url := "https://wttr.in/{" + strings.Join(cities, ",") + "}?m2&lang=ru&format=4"
-	// url := "https://wttr.in/{" + strings.Join(cities, ",") + "}?format=4"
+type WeatherService interface {
+	fetchWeather(cities []string) []string
+}
+
+type wttrInWeatherService struct{}
+
+func NewWttrInWeatherService() WeatherService {
+	return &wttrInWeatherService{}
+}
+
+func (s *wttrInWeatherService) fetchWeather(cities []string) (response []string) {
 	client := &http.Client{}
 
 	for _, city := range cities {
-		// url := `https://wttr.in/` + city + `?format=%l:+%c+🌡️+%t+%w\n`
 		url := `https://wttr.in/` + city + `?format=4`
 		req, err := http.NewRequest("GET", url, nil)
 		if err != nil {
@@ -147,7 +162,98 @@ func fetchWeather(cities []string) (response string) {
 			fmt.Println(err)
 			return
 		}
-		response += string(body)
+		response = append(response, string(body))
+	}
+
+	return
+}
+
+type openWeatherMapWeatherService struct {
+	apiKey string
+}
+
+func NewOpenWeatherMapWeatherService(apiKey string) WeatherService {
+	return &openWeatherMapWeatherService{
+		apiKey: apiKey,
+	}
+}
+
+func (s *openWeatherMapWeatherService) fetchWeather(cities []string) (response []string) {
+	client := &http.Client{}
+
+	for _, city := range cities {
+		locationUrl := fmt.Sprintf(
+			"http://api.openweathermap.org/geo/1.0/direct?q=%s&appid=%s&limit=1",
+			city,
+			s.apiKey,
+		)
+		req, err := http.NewRequest("GET", locationUrl, nil)
+		if err != nil {
+			fmt.Println(err)
+			return
+		}
+
+		resp, err := client.Do(req)
+		if err != nil {
+			fmt.Println(err)
+			return
+		}
+		defer resp.Body.Close()
+
+		body, err := io.ReadAll(resp.Body)
+		if err != nil {
+			fmt.Println(err)
+			return
+		}
+		var cityLocations []map[string]any
+		err = json.Unmarshal(body, &cityLocations)
+		if err != nil {
+			fmt.Println(err)
+			return
+		}
+		cityLocation := cityLocations[0]
+
+		url := fmt.Sprintf(
+			"https://api.openweathermap.org/data/2.5/weather?lat=%f&lon=%f&appid=%s&units=metric&lang=ru",
+			cityLocation["lat"].(float64),
+			cityLocation["lon"].(float64),
+			s.apiKey,
+		)
+		req, err = http.NewRequest("GET", url, nil)
+		if err != nil {
+			fmt.Println(err)
+			return
+		}
+
+		resp, err = client.Do(req)
+		if err != nil {
+			fmt.Println(err)
+			return
+		}
+		defer resp.Body.Close()
+
+		body, err = io.ReadAll(resp.Body)
+		if err != nil {
+			fmt.Println(err)
+			return
+		}
+		var res map[string]any
+		err = json.Unmarshal(body, &res)
+		if err != nil {
+			fmt.Println(err)
+			return
+		}
+
+		response = append(
+			response,
+			fmt.Sprintf(
+				"%s: %s 🌡️%.1f⁰C 🌬️ %.1f km/h\n",
+				city,
+				res["weather"].([]any)[0].(map[string]any)["description"].(string),
+				res["main"].(map[string]any)["temp"].(float64),
+				res["wind"].(map[string]any)["speed"].(float64),
+			),
+		)
 	}
 
 	return
