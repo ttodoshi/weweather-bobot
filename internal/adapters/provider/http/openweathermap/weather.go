@@ -63,7 +63,7 @@ func (s *openWeatherMapWeatherProvider) FetchWeather(cities []string) (response 
 		cityLocation := cityLocations[0]
 
 		url := fmt.Sprintf(
-			"https://api.openweathermap.org/data/2.5/weather?lat=%f&lon=%f&appid=%s&units=metric&lang=ru",
+			"https://api.openweathermap.org/data/2.5/forecast?lat=%f&lon=%f&appid=%s&units=metric&lang=ru",
 			cityLocation["lat"].(float64),
 			cityLocation["lon"].(float64),
 			s.apiKey,
@@ -93,16 +93,21 @@ func (s *openWeatherMapWeatherProvider) FetchWeather(cities []string) (response 
 			return
 		}
 
-		response = append(
-			response,
-			fmt.Sprintf(
-				"%s: %s 🌡️%.1f⁰C 🌬️ %.1f km/h\n",
-				city,
-				res["weather"].([]any)[0].(map[string]any)["description"].(string),
-				res["main"].(map[string]any)["temp"].(float64),
-				res["wind"].(map[string]any)["speed"].(float64),
-			),
-		)
+		response = append(response, fmt.Sprintf("%s:\n", city))
+		weatherList := res["list"].([]any)
+
+		for i := 0; i < len(weatherList); i += 8 {
+			response = append(
+				response,
+				fmt.Sprintf(
+					"%s: %s 🌡️%.1f⁰C 🌬️ %.1f km/h\n",
+					weatherList[i].(map[string]any)["dt_txt"],
+					weatherList[i].(map[string]any)["weather"].([]any)[0].(map[string]any)["description"].(string),
+					weatherList[i].(map[string]any)["main"].(map[string]any)["temp"].(float64),
+					weatherList[i].(map[string]any)["wind"].(map[string]any)["speed"].(float64),
+				),
+			)
+		}
 	}
 
 	return

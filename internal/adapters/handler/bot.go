@@ -88,7 +88,7 @@ func (h *CommandHandler) HandleCommand(update tg.Update) {
 
 				// Возращение погоды для городов пользователя
 				if len(cities) > 0 {
-					msg.Text = "Погода в ваших городах:\n"
+					msg.Text = "Погода в ваших городах:\n\n"
 					for _, w := range h.weatherProvider.FetchWeather(cities) {
 						msg.Text += w
 					}
